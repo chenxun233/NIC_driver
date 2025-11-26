@@ -38,8 +38,10 @@
 
 // #include <rte_common.h>
 #define RTE_PTR_ADD(ptr, x) ((void*)((uintptr_t)(ptr) + (x)))
-#define RTE_ALIGN_FLOOR(val, align) (typeof(val))((val) & (~((typeof(val))((align)-1))))
-#define RTE_ALIGN_CEIL(val, align) RTE_ALIGN_FLOOR(((val) + ((typeof(val))(align)-1)), align)
+#define RTE_ALIGN_FLOOR(val, align) \
+	((__typeof__(val))((val) & ~((__typeof__(val))((align) - 1))))
+#define RTE_ALIGN_CEIL(val, align) \
+	RTE_ALIGN_FLOOR(((val) + ((__typeof__(val))((align) - 1))), align)
 #define RTE_PTR_ALIGN_FLOOR(ptr, align) ((typeof(ptr))RTE_ALIGN_FLOOR((uintptr_t)ptr, align))
 #define RTE_PTR_ALIGN_CEIL(ptr, align) RTE_PTR_ALIGN_FLOOR((typeof(ptr))RTE_PTR_ADD(ptr, (align)-1), align)
 
