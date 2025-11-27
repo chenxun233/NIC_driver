@@ -28,6 +28,7 @@ struct ixy_device* ixy_init(const char* pci_addr, uint16_t rx_queues, uint16_t t
 	} else {
 		// Our best guess is to try ixgbe
 		dev = ixgbe_init(pci_addr, rx_queues, tx_queues, interrupt_timeout);
+		setup_interrupts_wrapper(dev);
 		reset_and_init(dev);
 		return &dev->ixy;
 	}

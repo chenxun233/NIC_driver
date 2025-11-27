@@ -553,7 +553,16 @@ struct ixgbe_device* ixgbe_init(const char* pci_addr, uint16_t rx_queues, uint16
 	dev->ixy.interrupts.itr_rate = 0x028;
 	dev->ixy.interrupts.timeout_ms = interrupt_timeout;
 
-	if (!dev->ixy.vfio && interrupt_timeout != 0) {
+
+	dev->rx_queues = calloc(rx_queues, sizeof(struct ixgbe_rx_queue) + sizeof(void*) * MAX_RX_QUEUE_ENTRIES);
+	dev->tx_queues = calloc(tx_queues, sizeof(struct ixgbe_tx_queue) + sizeof(void*) * MAX_TX_QUEUE_ENTRIES);
+
+	return dev;
+}
+
+void setup_interrupts_wrapper(struct ixgbe_device* dev){
+
+	if (!dev->ixy.vfio && dev->ixy.interrupts.timeout_ms != 0) {
 		warn("Interrupts requested but VFIO not available: Disabling Interrupts!");
 		dev->ixy.interrupts.interrupts_enabled = false;
 	}
@@ -566,12 +575,9 @@ struct ixgbe_device* ixgbe_init(const char* pci_addr, uint16_t rx_queues, uint16
 		setup_interrupts(dev);
 	} else {
 		debug("mapping BAR0 region via pci file...");
-		dev->addr = pci_map_resource(pci_addr);
+		dev->addr = pci_map_resource(dev->ixy.pci_addr);
 	}
-	dev->rx_queues = calloc(rx_queues, sizeof(struct ixgbe_rx_queue) + sizeof(void*) * MAX_RX_QUEUE_ENTRIES);
-	dev->tx_queues = calloc(tx_queues, sizeof(struct ixgbe_tx_queue) + sizeof(void*) * MAX_TX_QUEUE_ENTRIES);
 
-	return dev;
 }
 
 uint32_t ixgbe_get_link_speed(const struct ixy_device* ixy) {

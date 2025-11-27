@@ -45,6 +45,8 @@ struct dma_memory {
 };
 
 struct dma_memory memory_allocate_dma(size_t size, bool require_contiguous);
+struct dma_memory memory_allocate_via_hugepage(size_t size, bool require_contiguous);
+struct dma_memory memory_allocate_via_vfiomap(size_t size, bool require_contiguous);
 
 struct mempool* memory_allocate_mempool(uint32_t num_entries, uint32_t entry_size);
 uint32_t pkt_buf_alloc_batch(struct mempool* mempool, struct pkt_buf* bufs[], uint32_t num_bufs);

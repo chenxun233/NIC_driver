@@ -17,12 +17,100 @@
 #include <sys/epoll.h>
 
 #include <driver/device.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 #define IRQ_SET_BUF_LEN (sizeof(struct vfio_irq_set) + sizeof(int))
 #define MAX_INTERRUPT_VECTORS 32
 #define MSIX_IRQ_SET_BUF_LEN (sizeof(struct vfio_irq_set) + sizeof(int) * (MAX_INTERRUPT_VECTORS + 1))
-
 ssize_t MIN_DMA_MEMORY = 4096; // we can not allocate less than page_size memory
+static uint64_t iova_start = 0x10000; //start from a low address
+static uint64_t iova_end = UINT64_MAX; 
+static uint64_t next_iova = 0;
+
+static inline uint64_t align_up_u64(uint64_t value, uint64_t alignment) {
+	if (!alignment) {
+		return value;
+	}
+	return (value + alignment - 1) & ~(alignment - 1);
+}
+
+uint64_t get_page_size() {
+	long page_size = sysconf(_SC_PAGESIZE);
+	if (page_size <= 0) {
+		page_size = 4096;
+	}
+	return (uint64_t) page_size;
+}
+
+static void vfio_detect_iommu_aperture(int container_fd) {
+	struct vfio_iommu_type1_info info = {.argsz = sizeof(info)};
+	if (ioctl(container_fd, VFIO_IOMMU_GET_INFO, &info) == -1) {
+		warn("failed to query IOMMU info, keeping defaults");
+		goto set_default;
+	}
+	size_t info_size = info.argsz;
+	struct vfio_iommu_type1_info* full = &info;
+	if (info_size > sizeof(info)) {
+		full = calloc(1, info_size);
+		if (!full) {
+			warn("failed to allocate memory for IOMMU info, keeping defaults");
+			goto set_default;
+		}
+		full->argsz = info_size;
+		if (ioctl(container_fd, VFIO_IOMMU_GET_INFO, full) == -1) {
+			warn("failed to query full IOMMU info, keeping defaults");
+			free(full);
+			goto set_default;
+		}
+	}
+
+	bool found = false;
+	uint64_t min_start = UINT64_MAX;
+	uint64_t max_end = 0;
+	if (full->cap_offset) {
+		struct vfio_info_cap_header* cap = (struct vfio_info_cap_header*) ((uint8_t*) full + full->cap_offset);
+		while (cap) {
+			if (cap->id == VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE) {
+				struct vfio_iommu_type1_info_cap_iova_range* range_cap = (struct vfio_iommu_type1_info_cap_iova_range*) cap;
+				for (uint32_t i = 0; i < range_cap->nr_iovas; i++) {
+					struct vfio_iova_range range = range_cap->iova_ranges[i];
+					if (!found || range.start < min_start) {
+						min_start = range.start;
+					}
+					if (!found || range.end > max_end) {
+						max_end = range.end;
+					}
+					found = true;
+				}
+				break;
+			}
+			if (!cap->next) {
+				break;
+			}
+			cap = (struct vfio_info_cap_header*) ((uint8_t*) full + cap->next);
+		}
+	}
+	if (found) {
+		iova_start = min_start;
+		iova_end = max_end;
+		debug("Detected IOMMU aperture: 0x%llx - 0x%llx", (unsigned long long) iova_start, (unsigned long long) iova_end);
+	} else {
+		debug("Using default IOMMU aperture: 0x%llx - 0x%llx", (unsigned long long) iova_start, (unsigned long long) iova_end);
+	}
+
+	if (full != &info) {
+		free(full);
+	}
+
+set_default:;
+	uint64_t page_size = (uint32_t) get_page_size();
+	uint64_t aligned_start = align_up_u64(iova_start, (uint64_t) page_size);
+	if (aligned_start > iova_end) {
+		error("IOMMU aperture invalid: start 0x%llx beyond end 0x%llx", (unsigned long long) aligned_start, (unsigned long long) iova_end);
+	}
+	next_iova = aligned_start;
+}
 
 void vfio_enable_dma(int device_fd) {
 	// write to the command register (offset 4) in the PCIe config space
@@ -273,6 +361,7 @@ int vfio_init(const char* pci_addr) {
 		// This can only be done after at least one group is in the container.
 		ret = check_err(ioctl(cfd, VFIO_SET_IOMMU, VFIO_TYPE1_IOMMU), "set IOMMU type");
 	}
+	vfio_detect_iommu_aperture(cfd);
 
 	// get device file descriptor
 	int vfio_fd = check_err(ioctl(vfio_gfd, VFIO_GROUP_GET_DEVICE_FD, pci_addr), "get device fd");
@@ -295,32 +384,54 @@ uint8_t* vfio_map_region(int vfio_fd, int region_index) {
 	return (uint8_t*) check_err(mmap(NULL, region_info.size, PROT_READ | PROT_WRITE, MAP_SHARED, vfio_fd, region_info.offset), "mmap vfio bar0 resource");
 }
 
+
+
 // returns iova (physical address of the DMA memory from device view) on success
 uint64_t vfio_map_dma(void* vaddr, uint32_t size) {
-	uint64_t iova = (uint64_t) vaddr; // map iova to process virtual address
+	uint64_t page_size = get_page_size();
+	uint64_t map_size = size < MIN_DMA_MEMORY ? MIN_DMA_MEMORY : size;
+	map_size = align_up_u64(map_size, page_size);
+
+	if (!next_iova) {
+		next_iova = align_up_u64(iova_start, page_size);
+	}
+
+	if (next_iova > iova_end || next_iova + map_size - 1 > iova_end) {
+		error("IOMMU aperture exhausted: need 0x%llx bytes", (unsigned long long) map_size);
+		exit(EXIT_FAILURE);
+	}
+
+	uint64_t iova = next_iova;
 	struct vfio_iommu_type1_dma_map dma_map = {
 		.vaddr = (uint64_t) vaddr,
 		.iova = iova,
-		.size = size < MIN_DMA_MEMORY ? MIN_DMA_MEMORY : size,
+		.size = map_size,
 		.argsz = sizeof(dma_map),
 		.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE};
 	int cfd = get_vfio_container();
 	check_err(ioctl(cfd, VFIO_IOMMU_MAP_DMA, &dma_map), "IOMMU Map DMA Memory");
+	next_iova = iova + map_size;
 	return iova;
 }
 
 // unmaps previously mapped DMA region. returns 0 on success
 uint64_t vfio_unmap_dma(int fd, uint64_t iova, uint32_t size) {
+	uint64_t page_size = (uint64_t) sysconf(_SC_PAGESIZE);
+	if (!page_size) {
+		page_size = 4096;
+	}
+	uint64_t map_size = size < MIN_DMA_MEMORY ? MIN_DMA_MEMORY : size;
+	map_size = align_up_u64(map_size, page_size);
+
 	struct vfio_iommu_type1_dma_unmap dma_unmap = {
 		.argsz = sizeof(dma_unmap),
 		.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE,
 		.iova = iova,
-		.size = size
+		.size = map_size
 	};
 	int cfd = get_vfio_container();
 	int ret = ioctl(cfd, VFIO_IOMMU_UNMAP_DMA, &dma_unmap);
 	if (ret == -1) {
-		// Failed to unmap DMA region
 		return -1;
 	}
 	return ret;

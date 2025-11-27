@@ -35,4 +35,5 @@ uint64_t vfio_map_dma(void* vaddr, uint32_t size);
 // unmaps previously mapped DMA region. returns 0 on success
 uint64_t vfio_unmap_dma(int fd, uint64_t iova, uint32_t size);
 
+uint64_t get_page_size();
 #endif //LIBIXY_VFIO_H
