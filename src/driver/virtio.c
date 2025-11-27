@@ -322,7 +322,7 @@ void virtio_read_stats(struct ixy_device* ixy, struct device_stats* stats) {
 }
 
 
-struct ixy_device* virtio_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues) {
+struct virtio_device* virtio_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues) {
 	if (getuid()) {
 		warn("Not running as root, this will probably fail");
 	}
@@ -355,7 +355,7 @@ struct ixy_device* virtio_init(const char* pci_addr, uint16_t rx_queues, uint16_
 	} else {
 		error("Modern device not supported");
 	}
-	return &dev->ixy;
+	return dev;
 }
 
 uint32_t virtio_rx_batch(struct ixy_device* ixy, uint16_t queue_id, struct pkt_buf* bufs[], uint32_t num_bufs) {

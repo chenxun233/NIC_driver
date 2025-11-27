@@ -443,7 +443,7 @@ static void wait_for_link(const struct ixgbe_device* dev) {
 }
 
 // see section 4.6.3
-static void reset_and_init(struct ixgbe_device* dev) {
+void reset_and_init(struct ixgbe_device* dev) {
 	info("Resetting device %s", dev->ixy.pci_addr);
 
 	// section 4.6.3.1 - disable all interrupts
@@ -510,7 +510,7 @@ static void reset_and_init(struct ixgbe_device* dev) {
  * 	- if set to 0 the interrupt is disabled entirely)
  * @return The initialized IXGBE device.
  */
-struct ixy_device* ixgbe_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues, int interrupt_timeout) {
+struct ixgbe_device* ixgbe_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues, int interrupt_timeout) {
 	if (getuid()) {
 		warn("Not running as root, this will probably fail");
 	}
@@ -570,8 +570,8 @@ struct ixy_device* ixgbe_init(const char* pci_addr, uint16_t rx_queues, uint16_t
 	}
 	dev->rx_queues = calloc(rx_queues, sizeof(struct ixgbe_rx_queue) + sizeof(void*) * MAX_RX_QUEUE_ENTRIES);
 	dev->tx_queues = calloc(tx_queues, sizeof(struct ixgbe_tx_queue) + sizeof(void*) * MAX_TX_QUEUE_ENTRIES);
-	reset_and_init(dev);
-	return &dev->ixy;
+
+	return dev;
 }
 
 uint32_t ixgbe_get_link_speed(const struct ixy_device* ixy) {

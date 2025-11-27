@@ -19,7 +19,7 @@ struct virtio_device {
 
 #define IXY_TO_VIRTIO(ixy_device) container_of(ixy_device, struct virtio_device, ixy)
 
-struct ixy_device* virtio_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues);
+struct virtio_device* virtio_init(const char* pci_addr, uint16_t rx_queues, uint16_t tx_queues);
 uint32_t virtio_get_link_speed(const struct ixy_device* dev);
 void virtio_set_promisc(struct ixy_device* dev, bool enabled);
 void virtio_read_stats(struct ixy_device* dev, struct device_stats* stats);
