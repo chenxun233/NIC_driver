@@ -12,26 +12,34 @@ struct ixy_device* ixy_init(const char* pci_addr, uint16_t rx_queues, uint16_t t
 	// (VFIO_PCI_CONFIG_REGION_INDEX). This is not needed, though, because
 	// every config file should be world-readable, and here we
 	// only read the vendor and device id.
-	int config = pci_open_resource(pci_addr, "config", O_RDONLY);
-	uint16_t vendor_id = read_io16(config, 0);
-	uint16_t device_id = read_io16(config, 2);
-	uint32_t class_id = read_io32(config, 8) >> 24;
-	struct ixgbe_device* dev;
-	struct virtio_device* vdev;
-	close(config);
-	if (class_id != 2) {
+	struct device_info info = get_device_info(pci_addr);
+	struct device device;
+
+	if (info.class_id != 2) {
 		error("Device %s is not a NIC", pci_addr);
 	}
-	if (vendor_id == 0x1af4 && device_id >= 0x1000) {
-		vdev = virtio_init(pci_addr, rx_queues, tx_queues);
-		return &vdev->ixy;
+	
+	if (info.vendor_id == 0x1af4 && info.device_id >= 0x1000) {
+		device.is_ixgbe_device = false;
+		device.dev.virtio = virtio_init(pci_addr, rx_queues, tx_queues);
+		return &device.dev.virtio->ixy;
 	} else {
+		device.is_ixgbe_device = true;
 		// Our best guess is to try ixgbe
-		dev = ixgbe_init(pci_addr, rx_queues, tx_queues, interrupt_timeout);
-		setup_interrupts_wrapper(dev);
-		reset_and_init(dev);
-		return &dev->ixy;
+		device.dev.ixgbe = ixgbe_init(pci_addr, rx_queues, tx_queues, interrupt_timeout);
+		setup_interrupts_wrapper(device.dev.ixgbe);
+		reset_and_init(device.dev.ixgbe);
+		return &device.dev.ixgbe->ixy;
 	}
 	
-	
+}
+
+struct device_info get_device_info(const char* pci_addr) {
+	struct device_info info;
+	int config = pci_open_resource(pci_addr, "config", O_RDONLY);
+	info.vendor_id = read_io16(config, 0);
+	info.device_id = read_io16(config, 2);
+	info.class_id = read_io32(config, 8) >> 24;
+	close(config);
+	return info;
 }

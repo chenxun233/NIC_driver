@@ -14,6 +14,22 @@
 // Forward declare struct to prevent cyclic include with stats.h
 struct device_stats;
 
+struct device_info {
+	uint16_t vendor_id;
+	uint16_t device_id;
+	uint32_t class_id;
+};
+
+struct device{
+	bool is_ixgbe_device;
+	union {
+		struct virtio_device* virtio;
+		struct ixgbe_device* ixgbe;
+	} dev;
+};
+
+struct device_info get_device_info(const char* pci_addr);
+
 struct __attribute__((__packed__)) mac_address {
 	uint8_t	addr[6];
 };
